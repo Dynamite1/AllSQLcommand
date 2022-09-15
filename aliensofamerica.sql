@@ -108,3 +108,141 @@ SELECT  RIGHT(email,CHARINDEX('@',REVERSE(email))-1) as Domain
 --19. Replace() function use to include all gender together except male and female
 SELECT [gender],REPLACE(gender,'Bigender','other')
   FROM [test].[dbo].[Aliens$] 
+--What is the total amount each customer spent at the restaurant? 
+SELECT [customer_id],
+       Sum([price])
+FROM   [test].[dannys_diner].[menu] A
+       JOIN [test].[dannys_diner].[sale] B
+         ON A.product_id = B.product_id
+GROUP  BY customer_id
+
+--2.How many days has each customer visited the restaurant? 
+SELECT customer_id,
+       Count(order_date) AS Total_Visit
+FROM   [test].[dannys_diner].[sale]
+GROUP  BY customer_id
+
+--What was the first item from the menu purchased by each customer? 
+SELECT r.*,
+       product_name
+FROM  (SELECT Row_number()
+                OVER (
+                  partition BY customer_id
+                  ORDER BY order_date) AS First_day,
+              [customer_id],
+              [order_date],
+              [product_id]
+       FROM   [test].[dannys_diner].[sale] s) r
+      INNER JOIN [test].[dannys_diner].[menu] m
+              ON r.product_id = m.product_id
+WHERE  first_day = 1
+
+--What is the most purchased item on the menu and how many times was it purchased by all customers?
+SELECT TOP 1 Count(*) AS Most_purcheased,
+             m.product_name
+FROM   [test].[dannys_diner].[sale] s
+       JOIN [test].[dannys_diner].[menu] m
+         ON s.product_id = m.product_id
+GROUP  BY s.product_id,
+          m.product_name
+ORDER  BY most_purcheased DESC
+
+--.Which item was the most popular for each customer? 
+SELECT *
+FROM   (SELECT r.*,
+               m.product_name,
+               Dense_rank()
+                 OVER(
+                   partition BY r.customer_id
+                   ORDER BY total_purchased DESC) AS ranked
+        FROM   (SELECT Count(s.product_id) AS total_purchased,
+                       customer_id,
+                       product_id
+                FROM   [test].[dannys_diner].[sale] s
+                GROUP  BY product_id,
+                          customer_id) r
+               JOIN [test].[dannys_diner].[menu] m
+                 ON r.product_id = m.product_id) t
+WHERE  ranked = 1
+
+--which item was purchased first by the customer after they became a member? 
+SELECT *
+FROM   (SELECT m.customer_id              AS customer,
+               me.product_name            AS product,
+               Rank()
+                 OVER (
+                   partition BY m.customer_id
+                   ORDER BY s.order_date) AS rnk
+        FROM   [test].[dannys_diner].[members] AS m
+               JOIN [test].[dannys_diner].[sale] AS s
+                 ON m.customer_id = s.customer_id
+               JOIN [test].[dannys_diner].[menu] AS me
+                 ON s.product_id = me.product_id
+        WHERE  s.order_date >= m.join_date) ff
+WHERE  rnk = 1
+
+--.Which item was purchased just before the customer became a member? 
+SELECT *
+FROM  (SELECT Rank()
+                OVER (
+                  partition BY s.customer_id
+                  ORDER BY s.order_date DESC) AS rnk,
+              me.product_name,
+              s.customer_id,
+              s.product_id,
+              s.order_date,
+              m.join_date
+       FROM   [test].[dannys_diner].[members] AS m
+              JOIN [test].[dannys_diner].[sale] AS s
+                ON m.customer_id = s.customer_id
+              JOIN [test].[dannys_diner].[menu] AS me
+                ON s.product_id = me.product_id
+       WHERE  s.order_date < m.join_date) ff
+WHERE  rnk = 1
+
+--what are the total items and amount spent for each member before they became a member? 
+SELECT Count(s.product_id),
+       Sum(me.price)
+FROM   [test].[dannys_diner].[members] AS m
+       JOIN [test].[dannys_diner].[sale] AS s
+         ON m.customer_id = s.customer_id
+       JOIN [test].[dannys_diner].[menu] AS me
+         ON s.product_id = me.product_id
+WHERE  s.order_date < m.join_date
+GROUP  BY s.customer_id
+
+--If each $1 spent equates to 10 points and sushi has a 2x points multiplier - how many points would each customer have? 
+SELECT s.customer_id,
+       Sum(CASE
+             WHEN me.product_name = 'sushi' THEN ( me.price * 20 )
+             ELSE ( me.price * 10 )
+           END) AS total_point
+FROM   [test].[dannys_diner].[sale] AS s
+       JOIN [test].[dannys_diner].[menu] AS me
+         ON s.product_id = me.product_id
+GROUP  BY s.customer_id
+
+/*In the first week after a customer joins the program (including their join date) they earn 2x points on all items,
+not just sushi - how many points do customer A and B have at the 
+end of January? */
+SELECT s.customer_id,
+       Sum(CASE
+             WHEN m.join_date > s.order_date THEN
+               CASE
+                 WHEN me.product_name = 'sushi' THEN ( me.price * 20 )
+                 ELSE ( me.price * 10 )
+               END
+             WHEN s.order_date > Dateadd(day, 6, m.join_date) THEN
+               CASE
+                 WHEN me.product_name = 'sushi' THEN ( me.price * 20 )
+                 ELSE ( me.price * 10 )
+               END
+             ELSE ( me.price * 20 )
+           END)
+FROM   [test].[dannys_diner].[members] AS m
+       JOIN [test].[dannys_diner].[sale] AS s
+         ON m.customer_id = s.customer_id
+       JOIN [test].[dannys_diner].[menu] AS me
+         ON s.product_id = me.product_id
+WHERE  order_date <= '2021-01-31'
+GROUP  BY s.customer_id 
